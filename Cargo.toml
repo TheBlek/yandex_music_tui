@@ -1,0 +1,20 @@
+[package]
+name = "yandex_music_cli"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+bytes = "1.2.1"
+reqwest = { version="0.11.11", features=["blocking", "json"] }
+tokio = { version="1.20", features=["full"] }
+rodio = "0.15.0"
+futures = "0.3"
+serde = { version = "1", features=["derive"] }
+xmltree = "0.10.3"
+md5 = "0.7.0"
+hex = "0.4.3"
+lazy_static = "1.4.0"
+rand = "0.8.5"
+termion = "2.0.1"
