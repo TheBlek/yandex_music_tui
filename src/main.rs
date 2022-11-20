@@ -108,6 +108,21 @@ impl FavoritesPlayer {
         self.music_sink.set_speed(speed);
     }
 
+    fn move_prev(&mut self) {
+        if self.queue_position > 1 {
+            self.queue_position -= 2;
+
+            self.next_track_task_handle = None;
+
+            let (volume, speed) = (self.music_sink.volume(), self.music_sink.speed());
+            self.music_sink.stop();
+
+            self.music_sink = Sink::try_new(&self.stream_handle).unwrap();
+            self.music_sink.set_volume(volume);
+            self.music_sink.set_speed(speed);
+        }
+    }
+
     fn toggle_playback(&self) {
         if self.music_sink.is_paused() {
             self.music_sink.play();
@@ -145,8 +160,7 @@ async fn update_player(player: &mut FavoritesPlayer) {
     } else if player.next_track_task_handle.is_none() {
         println!("Scheduling next track download");
         player.next_track_task_handle = Some(
-            Handle::current()
-                .spawn(
+            Handle::current().spawn(
                     download_data(player.next_track().id, player.client)
                 )
         );
@@ -162,6 +176,7 @@ enum AppEvent {
     SetSpeed(f32),
     TogglePlayback,
     NextTrack,
+    PrevTrack,
     Shuffle,
     Quit,
 }
@@ -218,7 +233,8 @@ async fn main() {
                     tx.send(AppEvent::SetSpeed(value)).unwrap()
                 },
                 "p" => {tx.send(AppEvent::TogglePlayback).unwrap()},
-                "n" => {tx.send(AppEvent::NextTrack).unwrap()},
+                "next" => {tx.send(AppEvent::NextTrack).unwrap()},
+                "prev" => {tx.send(AppEvent::PrevTrack).unwrap()},
                 "sh" => {tx.send(AppEvent::Shuffle).unwrap()},
                 "q" => {
                     tx.send(AppEvent::Quit).unwrap();
@@ -246,6 +262,7 @@ async fn main() {
                 AppEvent::TogglePlayback => { player.toggle_playback() },
                 AppEvent::Quit => { break 'app },
                 AppEvent::NextTrack => { player.move_next() },
+                AppEvent::PrevTrack => { player.move_prev() },
                 AppEvent::Shuffle => { player.shuffle_tracks(&mut rng) },
             }
         }
