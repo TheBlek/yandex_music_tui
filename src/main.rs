@@ -33,8 +33,8 @@ use rand::{
     thread_rng,
 };
 
-struct FavoritesPlayer {
-    favorites: Vec<Track>,
+struct Player {
+    tracks: Vec<Track>,
     queue: Vec<usize>,
     queue_position: usize,
     music_sink: Sink,
@@ -45,7 +45,7 @@ struct FavoritesPlayer {
     metronom: Interval,
 }
 
-async fn init_player(client: &'static Client, frame_time: u64) -> Result<FavoritesPlayer, Error> {
+async fn init_player(client: &'static Client, frame_time: u64) -> Result<Player, Error> {
     use api::*;
 
     let uid = account_uid(&client).await?;
@@ -60,9 +60,9 @@ async fn init_player(client: &'static Client, frame_time: u64) -> Result<Favorit
     let sink = Sink::try_new(&stream_handle).unwrap();
 
     Ok(
-        FavoritesPlayer {
+        Player {
             queue: Vec::from_iter(0..tracks.len()),
-            favorites: tracks,
+            tracks,
             music_sink: sink,
             _stream: stream,
             stream_handle,
@@ -74,13 +74,13 @@ async fn init_player(client: &'static Client, frame_time: u64) -> Result<Favorit
     )
 }
 
-impl FavoritesPlayer {
+impl Player {
     fn next_track<'a>(&'a self) -> &'a Track {
-        &self.favorites[self.queue[self.queue_position]]
+        &self.tracks[self.queue[self.queue_position]]
     }
 
     fn track_after_n<'a>(&'a self, n: usize) -> &'a Track {
-        &self.favorites[self.queue[self.queue_position + n]]
+        &self.tracks[self.queue[self.queue_position + n]]
     }
 
     fn volume(&self) -> f32 {
@@ -133,12 +133,28 @@ impl FavoritesPlayer {
 
     fn shuffle_tracks(&mut self, rng: &mut impl Rng) {
         self.queue.shuffle(rng); 
+        self.reset();
+    }
+    
+    fn reset(&mut self) {
         self.queue_position = 0;
         self.next_track_task_handle = None;
     }
 }
 
-async fn update_player(player: &mut FavoritesPlayer) {
+async fn playlists(player: &Player) -> Result<Vec<api::PlaylistInfo>, Error> {
+    api::playlists(api::account_uid(player.client).await?, player.client).await
+}
+
+async fn load_playlist_into_player(player:&mut Player, playlist: &api::PlaylistInfo) -> Result<(), Error> {
+   player.tracks = api::tracks_from_playlist(playlist, player.client).await?;
+   player.reset();
+   player.queue = Vec::from_iter(0..player.tracks.len());
+
+   Ok(())
+}
+
+async fn update_player(player: &mut Player) {
     player.metronom.tick().await;
 
     if player.music_sink.empty() {
@@ -171,13 +187,12 @@ enum AppEvent {
     ChangeVolume(f32),
     SetVolume(f32),
     PrintVolume,
-    ChangeSpeed(f32),
-    PrintSpeed,
-    SetSpeed(f32),
-    TogglePlayback,
+    ChangeSpeed(f32), PrintSpeed, SetSpeed(f32), TogglePlayback,
     NextTrack,
     PrevTrack,
     Shuffle,
+    ListPlaylists,
+    LoadPlaylist(u32),
     Quit,
 }
 
@@ -236,6 +251,18 @@ async fn main() {
                 "next" => {tx.send(AppEvent::NextTrack).unwrap()},
                 "prev" => {tx.send(AppEvent::PrevTrack).unwrap()},
                 "sh" => {tx.send(AppEvent::Shuffle).unwrap()},
+                "playlists" => {tx.send(AppEvent::ListPlaylists).unwrap()},
+                "load-playlist" => 'ss : {
+                    let Some(string) = args.next() else {
+                        error("Not enough arguments supplied"); 
+                        break 'ss;
+                    };
+                    let Ok(value) = string.parse::<u32>() else {
+                        error("Invalid argument format");
+                        break 'ss;
+                    };
+                    tx.send(AppEvent::LoadPlaylist(value)).unwrap()
+                },
                 "q" => {
                     tx.send(AppEvent::Quit).unwrap();
                     break;
@@ -260,10 +287,29 @@ async fn main() {
                 AppEvent::SetSpeed(speed) => { player.change_speed(speed - player.speed()) },
                 AppEvent::PrintSpeed => { println!("Current speed: {}", player.speed()) },
                 AppEvent::TogglePlayback => { player.toggle_playback() },
-                AppEvent::Quit => { break 'app },
                 AppEvent::NextTrack => { player.move_next() },
                 AppEvent::PrevTrack => { player.move_prev() },
+                AppEvent::ListPlaylists => {
+                    let playlists = playlists(&player)
+                        .await
+                        .unwrap()
+                        .into_iter()
+                        .enumerate();
+                    for (n, playlist) in playlists {
+                        println!("{}. {}", n, playlist.title);
+                    }
+                },
+                AppEvent::LoadPlaylist(n) => { 
+                    let playlists = playlists(&player)
+                        .await
+                        .unwrap();
+                    println!("Loading {}", playlists[n as usize].title);
+                    if let Err(_) = load_playlist_into_player(&mut player, &playlists[n as usize]).await {
+                        break 'app;
+                    }
+                },
                 AppEvent::Shuffle => { player.shuffle_tracks(&mut rng) },
+                AppEvent::Quit => { break 'app },
             }
         }
     }

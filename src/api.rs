@@ -188,6 +188,7 @@ pub fn authorized_client(token: &str) -> Result<Client, Error> {
     )
 }
 
+
 pub async fn account_uid(client: &Client) -> Result<u64, Error> {
     Ok(
         client
@@ -330,5 +331,63 @@ pub async fn download_data(id: TrackID, client: &Client) -> Result<TrackData, Er
             data: std::io::Cursor::new(bytes),
             loaded: std::time::Instant::now(),
         }
+    )
+}
+
+#[derive(Debug, Deserialize)]
+struct PlaylistsResponse {
+   result: Vec<PlaylistInfo>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct PlaylistInfo {
+    pub title: String,
+    #[serde(rename = "trackCount")]
+    pub track_count: usize,
+    pub kind: usize,
+    pub uid: usize,
+}
+
+
+pub async fn playlists(uid: u64, client: &Client) -> Result<Vec<PlaylistInfo>, Error> {
+    Ok(
+        client
+            .get(format!("https://api.music.yandex.net/users/{}/playlists/list", uid))
+            .send()
+            .await?
+            .json::<PlaylistsResponse>()
+            .await?
+            .result
+    )
+}
+
+#[derive(Debug, Deserialize)]
+struct PlaylistTracksResponse {
+    result: PlaylistTracksResponseResult,
+}
+
+#[derive(Debug, Deserialize)]
+struct PlaylistTracksResponseResult {
+    tracks: Vec<TrackWrapper>,
+}
+
+#[derive(Debug, Deserialize)]
+struct TrackWrapper {
+    track: Track,
+}
+
+pub async fn tracks_from_playlist(info: &PlaylistInfo, client: &Client) -> Result<Vec<Track>, Error> {
+    Ok(
+        client
+            .get(format!("https://api.music.yandex.net/users/{}/playlists/{}", info.uid, info.kind))
+            .send()
+            .await?
+            .json::<PlaylistTracksResponse>()
+            .await?
+            .result
+            .tracks
+            .into_iter()
+            .map(|wrapper| wrapper.track)
+            .collect::<Vec<Track>>()
     )
 }
