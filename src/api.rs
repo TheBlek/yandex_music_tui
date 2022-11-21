@@ -12,10 +12,10 @@ use serde::{
 
 #[derive(Debug, Deserialize)]
 pub struct AccountStatus {
-    uid: u64,
+    pub uid: u64,
     #[serde(rename = "displayName")]
-    display_name: String,
-    login: String,
+    pub display_name: String,
+    pub login: String,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize)]
@@ -188,6 +188,18 @@ pub fn authorized_client(token: &str) -> Result<Client, Error> {
     )
 }
 
+pub async fn account_status(client: &Client) -> Result<AccountStatus, Error> {
+    Ok(
+        client
+            .get("https://api.music.yandex.net/account/status/")
+            .send()
+            .await?
+            .json::<AccountStatusResponse>()
+            .await?
+            .result
+            .account
+    )
+}
 
 pub async fn account_uid(client: &Client) -> Result<u64, Error> {
     Ok(

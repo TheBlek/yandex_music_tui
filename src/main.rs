@@ -34,6 +34,7 @@ use rand::{
 };
 
 struct Player {
+    account: api::AccountStatus,
     tracks: Vec<Track>,
     queue: Vec<usize>,
     queue_position: usize,
@@ -48,8 +49,8 @@ struct Player {
 async fn init_player(client: &'static Client, frame_time: u64) -> Result<Player, Error> {
     use api::*;
 
-    let uid = account_uid(&client).await?;
-    let tracks = liked_music_tracks(uid, &client).await?;
+    let account = account_status(&client).await?;
+    let tracks = liked_music_tracks(account.uid, &client).await?;
     for track in &tracks {
         if track.duration.is_none() {
             println!("{:?}", track);
@@ -61,6 +62,7 @@ async fn init_player(client: &'static Client, frame_time: u64) -> Result<Player,
 
     Ok(
         Player {
+            account,
             queue: Vec::from_iter(0..tracks.len()),
             tracks,
             music_sink: sink,
@@ -143,11 +145,19 @@ impl Player {
 }
 
 async fn playlists(player: &Player) -> Result<Vec<api::PlaylistInfo>, Error> {
-    api::playlists(api::account_uid(player.client).await?, player.client).await
+    api::playlists(player.account.uid, player.client).await
 }
 
 async fn load_playlist_into_player(player:&mut Player, playlist: &api::PlaylistInfo) -> Result<(), Error> {
    player.tracks = api::tracks_from_playlist(playlist, player.client).await?;
+   player.reset();
+   player.queue = Vec::from_iter(0..player.tracks.len());
+
+   Ok(())
+}
+
+async fn load_favorites_into_player(player:&mut Player) -> Result<(), Error> {
+   player.tracks = api::liked_music_tracks(player.account.uid, player.client).await?;
    player.reset();
    player.queue = Vec::from_iter(0..player.tracks.len());
 
@@ -196,10 +206,11 @@ enum AppEvent {
     Shuffle,
     ListPlaylists,
     LoadPlaylist(u32),
+    LoadFavorites,
     Quit,
 }
 
-lazy_static::lazy_static!{
+lazy_static::lazy_static! {
     static ref CLIENT: Client = api::authorized_client(
         "y0_AgAAAAAVQHDFAAG8XgAAAADNLVcPViQQUTqtR66OJ5F0Db_M64fmFFQ"
     ).expect("Failed to create an authorised client");
@@ -266,6 +277,7 @@ async fn main() {
                     };
                     tx.send(AppEvent::LoadPlaylist(value)).unwrap()
                 },
+                "load-favorites" => {tx.send(AppEvent::LoadFavorites).unwrap()},
                 "q" => {
                     tx.send(AppEvent::Quit).unwrap();
                     break;
@@ -295,10 +307,8 @@ async fn main() {
                 AppEvent::ListPlaylists => {
                     let playlists = playlists(&player)
                         .await
-                        .unwrap()
-                        .into_iter()
-                        .enumerate();
-                    for (n, playlist) in playlists {
+                        .unwrap();
+                    for (n, playlist) in playlists.into_iter().enumerate() {
                         println!("{}. {}", n, playlist.title);
                     }
                 },
@@ -310,6 +320,9 @@ async fn main() {
                     if let Err(_) = load_playlist_into_player(&mut player, &playlists[n as usize]).await {
                         break 'app;
                     }
+                },
+                AppEvent::LoadFavorites => { 
+                    load_favorites_into_player(&mut player).await.unwrap()
                 },
                 AppEvent::Shuffle => { player.shuffle_tracks(&mut rng) },
                 AppEvent::Quit => { break 'app },
